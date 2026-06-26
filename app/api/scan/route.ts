@@ -31,7 +31,6 @@ export async function POST(request: Request) {
       throw new Error("Missing OPENAI_API_KEY.");
     }
 
-
     if (!body.imageBase64) {
       return Response.json(
         { ok: false, error: "Missing image." },
@@ -58,12 +57,15 @@ export async function POST(request: Request) {
       added: cards.length,
       cards,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error(err);
+
+    const message = err instanceof Error ? err.message : String(err);
+
     return Response.json(
       {
         ok: false,
-        error: err.message || String(err),
+        error: message,
       },
       { status: 500 }
     );
@@ -71,7 +73,7 @@ export async function POST(request: Request) {
 }
 
 async function extractBusinessCards(imageDataUrl: string) {
-  const model = process.env.OPENAI_MODEL || "gpt-5.4-mini";
+  const model = process.env.OPENAI_MODEL || "gpt-5-mini";
 
   const prompt = `
 Extract information from every visible business card in this image.
@@ -307,6 +309,6 @@ function normalizeOrgType(value: string) {
   return "";
 }
 
-function clean(value: any) {
+function clean(value: unknown) {
   return value ? String(value).trim() : "";
 }
