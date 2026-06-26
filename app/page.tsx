@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { CSSProperties } from "react";
 
 export default function Page() {
   const [language, setLanguage] = useState("English");
@@ -36,11 +37,12 @@ export default function Page() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-  preferredLanguage: language,
-  sourceName: sourceName.trim(),
-  mimeType: "image/jpeg",
-  imageBase64,
-}),
+          preferredLanguage: language,
+          sourceName: sourceName.trim(),
+          mimeType: "image/jpeg",
+          imageBase64,
+        }),
+      });
 
       const data = await response.json();
 
@@ -54,8 +56,12 @@ export default function Page() {
 
       const fileInput = document.getElementById("photo") as HTMLInputElement;
       if (fileInput) fileInput.value = "";
-    } catch (err: any) {
-      showError(err.message || String(err));
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        showError(err.message);
+      } else {
+        showError(String(err));
+      }
     } finally {
       setIsLoading(false);
     }
@@ -199,7 +205,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-const styles: Record<string, React.CSSProperties> = {
+const styles: Record<string, CSSProperties> = {
   page: {
     minHeight: "100vh",
     background:
@@ -271,7 +277,8 @@ const styles: Record<string, React.CSSProperties> = {
     padding: 15,
     borderRadius: 18,
     border: "none",
-    background: "linear-gradient(135deg, #4fc7bf 0%, #0b7fb4 52%, #5960aa 100%)",
+    background:
+      "linear-gradient(135deg, #4fc7bf 0%, #0b7fb4 52%, #5960aa 100%)",
     color: "white",
     fontWeight: 900,
     fontSize: 17,
