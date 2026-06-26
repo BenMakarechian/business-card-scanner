@@ -17,7 +17,7 @@ export default function Page() {
   async function handleSubmit() {
     try {
       if (!sourceName.trim()) {
-        showError("Please enter your name.");
+        showError("Please enter the uploader name.");
         return;
       }
 
@@ -32,7 +32,7 @@ export default function Page() {
       }
 
       setIsLoading(true);
-      showNeutral("Uploading and scanning image. This may take 10–30 seconds.");
+      showNeutral("Scanning image. This may take 10–30 seconds.");
 
       const imageBase64 = await resizeAndEncodeImage(photo, 1600);
 
@@ -99,13 +99,20 @@ export default function Page() {
   return (
     <main style={styles.page}>
       <section style={styles.card}>
-        <h1 style={styles.h1}>Business Card Scanner</h1>
-        <p style={styles.p}>
-          Take or upload one photo with multiple business cards. The app will
-          extract the contact information and add it to the Google Sheet.
-        </p>
+        <div style={styles.headerAccent}></div>
 
-        <label style={styles.label}>Preferred language</label>
+        <h1 style={styles.h1}>Super Scanner</h1>
+        <p style={styles.creator}>Created by Ben Makarechian</p>
+
+        <label style={styles.label}>Uploader</label>
+        <input
+          value={sourceName}
+          onChange={(e) => setSourceName(e.target.value)}
+          placeholder="Enter uploader name"
+          style={styles.input}
+        />
+
+        <label style={styles.label}>Contact&apos;s preferred language</label>
         <select
           value={language}
           onChange={(e) => setLanguage(e.target.value)}
@@ -114,14 +121,6 @@ export default function Page() {
           <option value="English">English</option>
           <option value="Chinese">Chinese</option>
         </select>
-
-        <label style={styles.label}>Your name</label>
-        <input
-          value={sourceName}
-          onChange={(e) => setSourceName(e.target.value)}
-          placeholder="Enter your name"
-          style={styles.input}
-        />
 
         <label style={styles.label}>Access code</label>
         <input
@@ -173,7 +172,7 @@ export default function Page() {
         )}
 
         <p style={styles.tip}>
-          Tip: Put 4–8 cards in one clear photo. Avoid glare and make sure
+          Tip: Put 1–8 cards in one clear photo. Avoid glare and make sure
           emails are readable.
         </p>
       </section>
@@ -220,82 +219,114 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 const styles: Record<string, React.CSSProperties> = {
   page: {
     minHeight: "100vh",
-    background: "#f5f5f7",
-    color: "#1d1d1f",
+    background:
+      "radial-gradient(circle at top left, rgba(85, 198, 190, 0.35), transparent 32%), radial-gradient(circle at bottom right, rgba(20, 129, 180, 0.35), transparent 34%), linear-gradient(135deg, #eefafb 0%, #f7f8ff 48%, #eef4fb 100%)",
+    color: "#162032",
     fontFamily:
       'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
     padding: 24,
     boxSizing: "border-box",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
   },
   card: {
+    width: "100%",
     maxWidth: 520,
     margin: "0 auto",
-    background: "white",
-    padding: 24,
-    borderRadius: 18,
-    boxShadow: "0 8px 24px rgba(0,0,0,0.08)",
+    background: "rgba(255, 255, 255, 0.88)",
+    backdropFilter: "blur(18px)",
+    WebkitBackdropFilter: "blur(18px)",
+    padding: 26,
+    borderRadius: 28,
+    boxShadow: "0 24px 70px rgba(25, 71, 112, 0.18)",
+    border: "1px solid rgba(255, 255, 255, 0.75)",
+  },
+  headerAccent: {
+    width: 58,
+    height: 8,
+    borderRadius: 999,
+    background: "linear-gradient(90deg, #4fc7bf, #0b7fb4, #5960aa)",
+    marginBottom: 18,
   },
   h1: {
-    fontSize: 28,
-    margin: "0 0 8px",
+    fontSize: 34,
+    lineHeight: 1,
+    margin: "0 0 6px",
+    letterSpacing: "-0.04em",
+    color: "#0d5f8c",
   },
-  p: {
-    color: "#555",
-    lineHeight: 1.45,
+  creator: {
+    margin: "0 0 24px",
+    fontSize: 13,
+    color: "#667085",
+    fontWeight: 600,
   },
   label: {
     display: "block",
-    fontWeight: 700,
-    marginTop: 18,
+    fontWeight: 800,
+    marginTop: 17,
     marginBottom: 8,
+    color: "#223047",
+    fontSize: 14,
+    letterSpacing: "0.01em",
   },
   input: {
     width: "100%",
     boxSizing: "border-box",
-    fontSize: 17,
-    padding: 13,
-    borderRadius: 12,
-    border: "1px solid #ccc",
-    background: "white",
+    fontSize: 16,
+    padding: "14px 15px",
+    borderRadius: 16,
+    border: "1px solid rgba(20, 129, 180, 0.22)",
+    background: "rgba(255, 255, 255, 0.94)",
+    color: "#162032",
+    outlineColor: "#4fc7bf",
   },
   button: {
     width: "100%",
-    marginTop: 22,
-    padding: 14,
-    borderRadius: 12,
+    marginTop: 24,
+    padding: 15,
+    borderRadius: 18,
     border: "none",
-    background: "#1d1d1f",
+    background: "linear-gradient(135deg, #4fc7bf 0%, #0b7fb4 52%, #5960aa 100%)",
     color: "white",
-    fontWeight: 800,
+    fontWeight: 900,
     fontSize: 17,
     cursor: "pointer",
+    boxShadow: "0 14px 30px rgba(11, 127, 180, 0.28)",
   },
   preview: {
-    marginTop: 14,
+    marginTop: 16,
     width: "100%",
-    borderRadius: 12,
+    borderRadius: 18,
+    border: "1px solid rgba(20, 129, 180, 0.18)",
   },
   status: {
     marginTop: 18,
     padding: 14,
-    borderRadius: 12,
+    borderRadius: 16,
     lineHeight: 1.4,
+    fontWeight: 700,
   },
   success: {
-    background: "#e8f7ee",
-    color: "#126b35",
+    background: "rgba(79, 199, 191, 0.15)",
+    color: "#08796f",
+    border: "1px solid rgba(79, 199, 191, 0.25)",
   },
   error: {
     background: "#fdeaea",
     color: "#9d1c1c",
+    border: "1px solid rgba(157, 28, 28, 0.12)",
   },
   neutral: {
-    background: "#eef3ff",
-    color: "#26427a",
+    background: "rgba(11, 127, 180, 0.12)",
+    color: "#0b5f89",
+    border: "1px solid rgba(11, 127, 180, 0.18)",
   },
   tip: {
-    fontSize: 14,
-    color: "#666",
+    fontSize: 13,
+    color: "#667085",
     marginTop: 18,
+    lineHeight: 1.45,
   },
 };
