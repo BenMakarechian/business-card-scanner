@@ -5,7 +5,6 @@ import { useState } from "react";
 export default function Page() {
   const [language, setLanguage] = useState("English");
   const [sourceName, setSourceName] = useState("");
-  const [accessCode, setAccessCode] = useState("");
   const [photo, setPhoto] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState("");
   const [status, setStatus] = useState("");
@@ -18,11 +17,6 @@ export default function Page() {
     try {
       if (!sourceName.trim()) {
         showError("Please enter the uploader name.");
-        return;
-      }
-
-      if (!accessCode.trim()) {
-        showError("Please enter the access code.");
         return;
       }
 
@@ -42,13 +36,11 @@ export default function Page() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          preferredLanguage: language,
-          sourceName: sourceName.trim(),
-          accessCode: accessCode.trim(),
-          mimeType: "image/jpeg",
-          imageBase64,
-        }),
-      });
+  preferredLanguage: language,
+  sourceName: sourceName.trim(),
+  mimeType: "image/jpeg",
+  imageBase64,
+}),
 
       const data = await response.json();
 
@@ -121,15 +113,6 @@ export default function Page() {
           <option value="English">English</option>
           <option value="Chinese">Chinese</option>
         </select>
-
-        <label style={styles.label}>Access code</label>
-        <input
-          type="password"
-          value={accessCode}
-          onChange={(e) => setAccessCode(e.target.value)}
-          placeholder="Enter access code"
-          style={styles.input}
-        />
 
         <label style={styles.label}>Business card photo</label>
         <input
