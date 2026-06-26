@@ -31,16 +31,6 @@ export async function POST(request: Request) {
       throw new Error("Missing OPENAI_API_KEY.");
     }
 
-    if (!process.env.APP_PASSWORD) {
-      throw new Error("Missing APP_PASSWORD.");
-    }
-
-    if (body.accessCode !== process.env.APP_PASSWORD) {
-      return Response.json(
-        { ok: false, error: "Incorrect access code." },
-        { status: 401 }
-      );
-    }
 
     if (!body.imageBase64) {
       return Response.json(
