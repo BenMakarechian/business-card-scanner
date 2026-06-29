@@ -50,6 +50,8 @@ export async function POST(request: Request) {
       cards,
       preferredLanguage: normalizeLanguage(body.preferredLanguage),
       sourceName: clean(body.sourceName),
+      targetSheetId: clean(body.targetSheetId),
+      targetSheetName: clean(body.targetSheetName),
     });
 
     return Response.json({
@@ -185,13 +187,24 @@ async function appendCardsToSheet({
   cards,
   preferredLanguage,
   sourceName,
+  targetSheetId,
+  targetSheetName,
 }: {
   cards: Card[];
   preferredLanguage: string;
   sourceName: string;
+  targetSheetId: string;
+  targetSheetName: string;
 }) {
-  if (!process.env.GOOGLE_SHEET_ID) {
-    throw new Error("Missing GOOGLE_SHEET_ID.");
+  const spreadsheetId = targetSheetId || process.env.GOOGLE_SHEET_ID || "";
+  const sheetName = targetSheetName || process.env.SHEET_NAME || "Sheet1";
+
+  if (!spreadsheetId) {
+    throw new Error("Missing Google Sheet ID.");
+  }
+
+  if (!isValidSheetId(spreadsheetId)) {
+    throw new Error("Invalid Google Sheet ID.");
   }
 
   if (!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL) {
@@ -213,7 +226,6 @@ async function appendCardsToSheet({
   const sheets = google.sheets({ version: "v4", auth });
 
   const timestamp = formatTimestamp();
-  const sheetName = process.env.SHEET_NAME || "Sheet1";
 
   const rows = cards.map((card) => [
     timestamp,
@@ -232,8 +244,8 @@ async function appendCardsToSheet({
   if (rows.length === 0) return;
 
   await sheets.spreadsheets.values.append({
-    spreadsheetId: process.env.GOOGLE_SHEET_ID,
-    range: `${sheetName}!A:K`,
+    spreadsheetId,
+    range: `${quoteSheetName(sheetName)}!A:K`,
     valueInputOption: "USER_ENTERED",
     insertDataOption: "INSERT_ROWS",
     requestBody: {
@@ -307,6 +319,15 @@ function normalizeOrgType(value: string) {
   }
 
   return "";
+}
+
+function isValidSheetId(value: string) {
+  return /^[a-zA-Z0-9-_]{20,}$/.test(value);
+}
+
+function quoteSheetName(value: string) {
+  const safeName = value.replace(/'/g, "''");
+  return `'${safeName}'`;
 }
 
 function clean(value: unknown) {
