@@ -12,7 +12,10 @@ const ORG_TYPES = [
   "Media",
 ] as const;
 
-type Card = {
+type OrgType = (typeof ORG_TYPES)[number];
+
+type EnglishCard = {
+  position_index: number;
   first_name: string;
   last_name: string;
   title: string;
@@ -21,6 +24,17 @@ type Card = {
   phone: string;
   organization_type: string;
   notes: string;
+};
+
+type ChineseCard = {
+  position_index: number;
+  chinese_name: string;
+  email: string;
+  notes: string;
+};
+
+type FinalCard = EnglishCard & {
+  chinese_name: string;
 };
 
 export async function POST(request: Request) {
@@ -33,18 +47,41 @@ export async function POST(request: Request) {
 
     if (!body.imageBase64) {
       return Response.json(
-        { ok: false, error: "Missing image." },
+        { ok: false, error: "Missing English-side image." },
         { status: 400 }
       );
     }
 
-    const imageDataUrl = makeImageDataUrl(
+    const englishImageDataUrl = makeImageDataUrl(
       body.imageBase64,
       body.mimeType || "image/jpeg"
     );
 
-    const extracted = await extractBusinessCards(imageDataUrl);
-    const cards: Card[] = extracted.cards || [];
+    let cards: FinalCard[];
+
+    if (body.scanChineseNames && body.chineseImageBase64) {
+      const chineseImageDataUrl = makeImageDataUrl(
+        body.chineseImageBase64,
+        body.chineseMimeType || "image/jpeg"
+      );
+
+      const extracted = await extractBusinessCardsWithChineseNames(
+        englishImageDataUrl,
+        chineseImageDataUrl
+      );
+
+      cards = mergeEnglishAndChineseCards(
+        extracted.english_cards || [],
+        extracted.chinese_cards || []
+      );
+    } else {
+      const extracted = await extractEnglishBusinessCards(englishImageDataUrl);
+
+      cards = (extracted.cards || []).map((card: EnglishCard) => ({
+        ...card,
+        chinese_name: "",
+      }));
+    }
 
     await appendCardsToSheet({
       cards,
@@ -74,7 +111,7 @@ export async function POST(request: Request) {
   }
 }
 
-async function extractBusinessCards(imageDataUrl: string) {
+async function extractEnglishBusinessCards(imageDataUrl: string) {
   const model = process.env.OPENAI_MODEL || "gpt-5-mini";
 
   const prompt = `
@@ -82,6 +119,7 @@ Extract information from every visible business card in this image.
 
 Rules:
 - One object per business card.
+- Assign position_index by visual order, starting at 1, reading top-to-bottom and left-to-right.
 - Prioritize office phone over mobile phone if both are listed.
 - If a field is unreadable or missing, use an empty string.
 - Split names into first_name and last_name.
@@ -100,37 +138,175 @@ Rules:
     properties: {
       cards: {
         type: "array",
-        items: {
-          type: "object",
-          additionalProperties: false,
-          required: [
-            "first_name",
-            "last_name",
-            "title",
-            "affiliation",
-            "email",
-            "phone",
-            "organization_type",
-            "notes",
-          ],
-          properties: {
-            first_name: { type: "string" },
-            last_name: { type: "string" },
-            title: { type: "string" },
-            affiliation: { type: "string" },
-            email: { type: "string" },
-            phone: { type: "string" },
-            organization_type: {
-              type: "string",
-              enum: ORG_TYPES,
-            },
-            notes: { type: "string" },
-          },
-        },
+        items: englishCardSchema(),
       },
     },
   };
 
+  return callOpenAIForJson({
+    model,
+    schemaName: "english_business_card_extraction",
+    schema,
+    content: [
+      {
+        type: "input_text",
+        text: prompt,
+      },
+      {
+        type: "input_image",
+        image_url: imageDataUrl,
+        detail: "high",
+      },
+    ],
+  });
+}
+
+async function extractBusinessCardsWithChineseNames(
+  englishImageDataUrl: string,
+  chineseImageDataUrl: string
+) {
+  const model = process.env.OPENAI_MODEL || "gpt-5-mini";
+
+  const prompt = `
+You will receive two images from the same batch of business cards.
+
+Image 1 is the English-side photo.
+Image 2 is the Chinese-side photo.
+
+Task:
+1. From Image 1, extract the English-side business card information.
+2. From Image 2, extract the Traditional Chinese name and email address from each matching card.
+3. Do NOT combine the cards yourself. Return two separate arrays: english_cards and chinese_cards.
+4. The app will match cards by email first and position second.
+
+Rules for english_cards:
+- One object per visible English-side card.
+- Assign position_index by visual order, starting at 1, reading top-to-bottom and left-to-right.
+- Prioritize office phone over mobile phone if both are listed.
+- If a field is unreadable or missing, use an empty string.
+- Split romanized/English names into first_name and last_name.
+- Organization type must be exactly one of:
+  Academic, NPO/Think tank, Corporate, Foreign Representative, Taiwan Government Rep, Media.
+- Classify universities and research institutes as Academic unless clearly a think tank/NPO.
+- Classify companies as Corporate.
+- Classify foundations, NGOs, policy organizations, and think tanks as NPO/Think tank.
+- Do not invent information.
+
+Rules for chinese_cards:
+- One object per visible Chinese-side card.
+- Assign position_index by visual order, starting at 1, reading top-to-bottom and left-to-right.
+- Extract the person's Traditional Chinese name only into chinese_name.
+- Do not include titles, company names, departments, addresses, or honorifics in chinese_name.
+- Extract the email address on the Chinese side if visible.
+- If the Chinese name is unreadable or missing, use an empty string.
+- If the email is unreadable or missing, use an empty string.
+- Do not invent information.
+`;
+
+  const schema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["english_cards", "chinese_cards"],
+    properties: {
+      english_cards: {
+        type: "array",
+        items: englishCardSchema(),
+      },
+      chinese_cards: {
+        type: "array",
+        items: chineseCardSchema(),
+      },
+    },
+  };
+
+  return callOpenAIForJson({
+    model,
+    schemaName: "bilingual_business_card_extraction",
+    schema,
+    content: [
+      {
+        type: "input_text",
+        text: prompt,
+      },
+      {
+        type: "input_text",
+        text: "Image 1: English-side business cards.",
+      },
+      {
+        type: "input_image",
+        image_url: englishImageDataUrl,
+        detail: "high",
+      },
+      {
+        type: "input_text",
+        text: "Image 2: Chinese-side business cards.",
+      },
+      {
+        type: "input_image",
+        image_url: chineseImageDataUrl,
+        detail: "high",
+      },
+    ],
+  });
+}
+
+function englishCardSchema() {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "position_index",
+      "first_name",
+      "last_name",
+      "title",
+      "affiliation",
+      "email",
+      "phone",
+      "organization_type",
+      "notes",
+    ],
+    properties: {
+      position_index: { type: "integer" },
+      first_name: { type: "string" },
+      last_name: { type: "string" },
+      title: { type: "string" },
+      affiliation: { type: "string" },
+      email: { type: "string" },
+      phone: { type: "string" },
+      organization_type: {
+        type: "string",
+        enum: [...ORG_TYPES],
+      },
+      notes: { type: "string" },
+    },
+  };
+}
+
+function chineseCardSchema() {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["position_index", "chinese_name", "email", "notes"],
+    properties: {
+      position_index: { type: "integer" },
+      chinese_name: { type: "string" },
+      email: { type: "string" },
+      notes: { type: "string" },
+    },
+  };
+}
+
+async function callOpenAIForJson({
+  model,
+  schemaName,
+  schema,
+  content,
+}: {
+  model: string;
+  schemaName: string;
+  schema: object;
+  content: Array<Record<string, unknown>>;
+}) {
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -142,23 +318,13 @@ Rules:
       input: [
         {
           role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: prompt,
-            },
-            {
-              type: "input_image",
-              image_url: imageDataUrl,
-              detail: "high",
-            },
-          ],
+          content,
         },
       ],
       text: {
         format: {
           type: "json_schema",
-          name: "business_card_extraction",
+          name: schemaName,
           schema,
           strict: true,
         },
@@ -183,6 +349,52 @@ Rules:
   return JSON.parse(outputText);
 }
 
+function mergeEnglishAndChineseCards(
+  englishCards: EnglishCard[],
+  chineseCards: ChineseCard[]
+): FinalCard[] {
+  const chineseByEmail = new Map<string, ChineseCard>();
+  const usedChineseCards = new Set<ChineseCard>();
+
+  for (const chineseCard of chineseCards) {
+    const email = normalizeEmail(chineseCard.email);
+
+    if (email && !chineseByEmail.has(email)) {
+      chineseByEmail.set(email, chineseCard);
+    }
+  }
+
+  return englishCards.map((englishCard, index) => {
+    const englishEmail = normalizeEmail(englishCard.email);
+    let matchedChineseCard: ChineseCard | undefined;
+
+    if (englishEmail) {
+      matchedChineseCard = chineseByEmail.get(englishEmail);
+    }
+
+    if (!matchedChineseCard) {
+      matchedChineseCard = chineseCards.find(
+        (chineseCard) =>
+          chineseCard.position_index === englishCard.position_index &&
+          !usedChineseCards.has(chineseCard)
+      );
+    }
+
+    if (!matchedChineseCard && chineseCards[index] && !usedChineseCards.has(chineseCards[index])) {
+      matchedChineseCard = chineseCards[index];
+    }
+
+    if (matchedChineseCard) {
+      usedChineseCards.add(matchedChineseCard);
+    }
+
+    return {
+      ...englishCard,
+      chinese_name: clean(matchedChineseCard?.chinese_name),
+    };
+  });
+}
+
 async function appendCardsToSheet({
   cards,
   preferredLanguage,
@@ -190,7 +402,7 @@ async function appendCardsToSheet({
   targetSheetId,
   targetSheetName,
 }: {
-  cards: Card[];
+  cards: FinalCard[];
   preferredLanguage: string;
   sourceName: string;
   targetSheetId: string;
@@ -231,7 +443,7 @@ async function appendCardsToSheet({
     timestamp,
     clean(card.first_name),
     clean(card.last_name),
-    "",
+    clean(card.chinese_name),
     clean(card.title),
     clean(card.affiliation),
     clean(card.email),
@@ -315,10 +527,18 @@ function normalizeOrgType(value: string) {
   const cleaned = clean(value);
 
   if ((ORG_TYPES as readonly string[]).includes(cleaned)) {
-    return cleaned;
+    return cleaned as OrgType;
   }
 
   return "";
+}
+
+function normalizeEmail(value: string) {
+  return clean(value)
+    .toLowerCase()
+    .replace(/^mailto:/i, "")
+    .replace(/\s/g, "")
+    .replace(/[<>]/g, "");
 }
 
 function isValidSheetId(value: string) {
