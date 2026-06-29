@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 
 export default function Page() {
@@ -13,6 +13,35 @@ export default function Page() {
     "neutral"
   );
   const [isLoading, setIsLoading] = useState(false);
+
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [targetSheetId, setTargetSheetId] = useState("");
+  const [targetSheetName, setTargetSheetName] = useState("");
+
+  useEffect(() => {
+    const savedSheetId = window.localStorage.getItem("superScannerSheetId") || "";
+    const savedSheetName =
+      window.localStorage.getItem("superScannerSheetName") || "";
+
+    setTargetSheetId(savedSheetId);
+    setTargetSheetName(savedSheetName);
+  }, []);
+
+  function saveSettings() {
+    window.localStorage.setItem("superScannerSheetId", targetSheetId.trim());
+    window.localStorage.setItem("superScannerSheetName", targetSheetName.trim());
+    setIsSettingsOpen(false);
+    showSuccess("Settings saved");
+  }
+
+  function clearSettings() {
+    setTargetSheetId("");
+    setTargetSheetName("");
+    window.localStorage.removeItem("superScannerSheetId");
+    window.localStorage.removeItem("superScannerSheetName");
+    setIsSettingsOpen(false);
+    showSuccess("Using default spreadsheet");
+  }
 
   async function handleSubmit() {
     try {
@@ -41,6 +70,8 @@ export default function Page() {
           sourceName: sourceName.trim(),
           mimeType: "image/jpeg",
           imageBase64,
+          targetSheetId: targetSheetId.trim(),
+          targetSheetName: targetSheetName.trim(),
         }),
       });
 
@@ -97,10 +128,26 @@ export default function Page() {
   return (
     <main style={styles.page}>
       <section style={styles.card}>
+        <button
+          type="button"
+          aria-label="Settings"
+          onClick={() => setIsSettingsOpen(true)}
+          style={styles.settingsButton}
+        >
+          ⚙
+        </button>
+
         <div style={styles.headerAccent}></div>
 
         <h1 style={styles.h1}>Super Scanner</h1>
         <p style={styles.creator}>Created by Ben Makarechian</p>
+
+        {targetSheetId && (
+          <div style={styles.sheetNotice}>
+            Custom spreadsheet active
+            {targetSheetName ? ` · ${targetSheetName}` : ""}
+          </div>
+        )}
 
         <label style={styles.label}>Uploader</label>
         <input
@@ -165,6 +212,56 @@ export default function Page() {
           emails are readable.
         </p>
       </section>
+
+      {isSettingsOpen && (
+        <div style={styles.modalBackdrop}>
+          <div style={styles.modal}>
+            <div style={styles.modalHeader}>
+              <h2 style={styles.modalTitle}>Settings</h2>
+              <button
+                type="button"
+                onClick={() => setIsSettingsOpen(false)}
+                style={styles.closeButton}
+              >
+                ×
+              </button>
+            </div>
+
+            <p style={styles.modalText}>
+              Choose where scans should be saved. The spreadsheet must be shared
+              with the Google service account as an Editor.
+            </p>
+
+            <label style={styles.label}>Google Sheet ID</label>
+            <input
+              value={targetSheetId}
+              onChange={(e) => setTargetSheetId(e.target.value)}
+              placeholder="Paste the Sheet ID"
+              style={styles.input}
+            />
+
+            <label style={styles.label}>Sheet/tab name</label>
+            <input
+              value={targetSheetName}
+              onChange={(e) => setTargetSheetName(e.target.value)}
+              placeholder="Example: Sheet1"
+              style={styles.input}
+            />
+
+            <button type="button" onClick={saveSettings} style={styles.button}>
+              Save Settings
+            </button>
+
+            <button
+              type="button"
+              onClick={clearSettings}
+              style={styles.secondaryButton}
+            >
+              Use Default Spreadsheet
+            </button>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
@@ -220,6 +317,7 @@ const styles: Record<string, CSSProperties> = {
     justifyContent: "center",
   },
   card: {
+    position: "relative",
     width: "100%",
     maxWidth: 520,
     margin: "0 auto",
@@ -230,6 +328,20 @@ const styles: Record<string, CSSProperties> = {
     borderRadius: 28,
     boxShadow: "0 24px 70px rgba(25, 71, 112, 0.18)",
     border: "1px solid rgba(255, 255, 255, 0.75)",
+  },
+  settingsButton: {
+    position: "absolute",
+    top: 18,
+    right: 18,
+    width: 42,
+    height: 42,
+    borderRadius: 999,
+    border: "1px solid rgba(20, 129, 180, 0.18)",
+    background: "rgba(255, 255, 255, 0.82)",
+    color: "#0d5f8c",
+    fontSize: 20,
+    cursor: "pointer",
+    boxShadow: "0 8px 18px rgba(25, 71, 112, 0.08)",
   },
   headerAccent: {
     width: 58,
@@ -250,6 +362,16 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 13,
     color: "#667085",
     fontWeight: 600,
+  },
+  sheetNotice: {
+    marginBottom: 12,
+    padding: "10px 12px",
+    borderRadius: 14,
+    background: "rgba(79, 199, 191, 0.12)",
+    color: "#08796f",
+    border: "1px solid rgba(79, 199, 191, 0.22)",
+    fontSize: 13,
+    fontWeight: 800,
   },
   label: {
     display: "block",
@@ -285,6 +407,18 @@ const styles: Record<string, CSSProperties> = {
     cursor: "pointer",
     boxShadow: "0 14px 30px rgba(11, 127, 180, 0.28)",
   },
+  secondaryButton: {
+    width: "100%",
+    marginTop: 12,
+    padding: 14,
+    borderRadius: 18,
+    border: "1px solid rgba(20, 129, 180, 0.2)",
+    background: "rgba(255, 255, 255, 0.86)",
+    color: "#0d5f8c",
+    fontWeight: 900,
+    fontSize: 16,
+    cursor: "pointer",
+  },
   preview: {
     marginTop: 16,
     width: "100%",
@@ -318,5 +452,54 @@ const styles: Record<string, CSSProperties> = {
     color: "#667085",
     marginTop: 18,
     lineHeight: 1.45,
+  },
+  modalBackdrop: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(11, 34, 54, 0.42)",
+    backdropFilter: "blur(8px)",
+    WebkitBackdropFilter: "blur(8px)",
+    padding: 20,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 50,
+  },
+  modal: {
+    width: "100%",
+    maxWidth: 500,
+    background: "rgba(255, 255, 255, 0.96)",
+    borderRadius: 26,
+    padding: 24,
+    boxShadow: "0 24px 80px rgba(0, 0, 0, 0.22)",
+    border: "1px solid rgba(255, 255, 255, 0.75)",
+  },
+  modalHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  modalTitle: {
+    margin: 0,
+    fontSize: 24,
+    color: "#0d5f8c",
+    letterSpacing: "-0.03em",
+  },
+  closeButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 999,
+    border: "1px solid rgba(20, 129, 180, 0.18)",
+    background: "white",
+    color: "#0d5f8c",
+    fontSize: 28,
+    lineHeight: 1,
+    cursor: "pointer",
+  },
+  modalText: {
+    color: "#667085",
+    lineHeight: 1.45,
+    margin: "12px 0 4px",
   },
 };
