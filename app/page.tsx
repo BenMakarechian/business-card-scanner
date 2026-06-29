@@ -6,8 +6,15 @@ import type { CSSProperties } from "react";
 export default function Page() {
   const [language, setLanguage] = useState("English");
   const [sourceName, setSourceName] = useState("");
-  const [photo, setPhoto] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState("");
+
+  const [scanChineseNames, setScanChineseNames] = useState(false);
+
+  const [englishPhoto, setEnglishPhoto] = useState<File | null>(null);
+  const [chinesePhoto, setChinesePhoto] = useState<File | null>(null);
+
+  const [englishPreviewUrl, setEnglishPreviewUrl] = useState("");
+  const [chinesePreviewUrl, setChinesePreviewUrl] = useState("");
+
   const [status, setStatus] = useState("");
   const [statusType, setStatusType] = useState<"neutral" | "success" | "error">(
     "neutral"
@@ -50,15 +57,29 @@ export default function Page() {
         return;
       }
 
-      if (!photo) {
-        showError("Please take or upload a photo.");
+      if (!englishPhoto) {
+        showError("Please take or upload the English-side photo.");
+        return;
+      }
+
+      if (scanChineseNames && !chinesePhoto) {
+        showError("Please take or upload the Chinese-side photo.");
         return;
       }
 
       setIsLoading(true);
-      showNeutral("Scanning image. This may take 10–30 seconds.");
+      showNeutral(
+        scanChineseNames
+          ? "Scanning English and Chinese sides. This may take 20–45 seconds."
+          : "Scanning image. This may take 10–30 seconds."
+      );
 
-      const imageBase64 = await resizeAndEncodeImage(photo, 1600);
+      const imageBase64 = await resizeAndEncodeImage(englishPhoto, 1600);
+
+      let chineseImageBase64 = "";
+      if (scanChineseNames && chinesePhoto) {
+        chineseImageBase64 = await resizeAndEncodeImage(chinesePhoto, 1600);
+      }
 
       const response = await fetch("/api/scan", {
         method: "POST",
@@ -70,6 +91,9 @@ export default function Page() {
           sourceName: sourceName.trim(),
           mimeType: "image/jpeg",
           imageBase64,
+          scanChineseNames,
+          chineseMimeType: "image/jpeg",
+          chineseImageBase64,
           targetSheetId: targetSheetId.trim(),
           targetSheetName: targetSheetName.trim(),
         }),
@@ -82,11 +106,21 @@ export default function Page() {
       }
 
       showSuccess(`Successfully added ${data.added} cards`);
-      setPhoto(null);
-      setPreviewUrl("");
 
-      const fileInput = document.getElementById("photo") as HTMLInputElement;
-      if (fileInput) fileInput.value = "";
+      setEnglishPhoto(null);
+      setChinesePhoto(null);
+      setEnglishPreviewUrl("");
+      setChinesePreviewUrl("");
+
+      const englishInput = document.getElementById(
+        "englishPhoto"
+      ) as HTMLInputElement;
+      if (englishInput) englishInput.value = "";
+
+      const chineseInput = document.getElementById(
+        "chinesePhoto"
+      ) as HTMLInputElement;
+      if (chineseInput) chineseInput.value = "";
     } catch (err: unknown) {
       if (err instanceof Error) {
         showError(err.message);
@@ -98,16 +132,42 @@ export default function Page() {
     }
   }
 
-  function handlePhotoChange(file: File | null) {
-    setPhoto(file);
+  function handleEnglishPhotoChange(file: File | null) {
+    setEnglishPhoto(file);
 
     if (!file) {
-      setPreviewUrl("");
+      setEnglishPreviewUrl("");
       return;
     }
 
-    setPreviewUrl(URL.createObjectURL(file));
+    setEnglishPreviewUrl(URL.createObjectURL(file));
     setStatus("");
+  }
+
+  function handleChinesePhotoChange(file: File | null) {
+    setChinesePhoto(file);
+
+    if (!file) {
+      setChinesePreviewUrl("");
+      return;
+    }
+
+    setChinesePreviewUrl(URL.createObjectURL(file));
+    setStatus("");
+  }
+
+  function handleScanChineseNamesChange(checked: boolean) {
+    setScanChineseNames(checked);
+
+    if (!checked) {
+      setChinesePhoto(null);
+      setChinesePreviewUrl("");
+
+      const chineseInput = document.getElementById(
+        "chinesePhoto"
+      ) as HTMLInputElement;
+      if (chineseInput) chineseInput.value = "";
+    }
   }
 
   function showNeutral(message: string) {
@@ -139,7 +199,7 @@ export default function Page() {
 
         <div style={styles.headerAccent}></div>
 
-        <h1 style={styles.h1}>Super Scanner</h1>
+        <h1 style={styles.h1}>Multi Scan</h1>
         <p style={styles.creator}>Created by Ben Makarechian</p>
 
         {targetSheetId && (
@@ -167,18 +227,64 @@ export default function Page() {
           <option value="Chinese">Chinese</option>
         </select>
 
-        <label style={styles.label}>Business card photo</label>
+        <label style={styles.checkboxRow}>
+          <input
+            type="checkbox"
+            checked={scanChineseNames}
+            onChange={(e) => handleScanChineseNamesChange(e.target.checked)}
+            style={styles.checkbox}
+          />
+          <span style={styles.checkboxText}>Scan Chinese names</span>
+        </label>
+
+        {scanChineseNames && (
+          <p style={styles.helperText}>
+            Take the English-side photo first. Then flip the same cards and take
+            the Chinese-side photo. The app will match Chinese names using email
+            addresses when possible, then position/order as a fallback.
+          </p>
+        )}
+
+        <label style={styles.label}>
+          {scanChineseNames
+            ? "English-side business card photo"
+            : "Business card photo"}
+        </label>
         <input
-          id="photo"
+          id="englishPhoto"
           type="file"
           accept="image/*"
           capture="environment"
-          onChange={(e) => handlePhotoChange(e.target.files?.[0] || null)}
+          onChange={(e) => handleEnglishPhotoChange(e.target.files?.[0] || null)}
           style={styles.input}
         />
 
-        {previewUrl && (
-          <img src={previewUrl} alt="Preview" style={styles.preview} />
+        {englishPreviewUrl && (
+          <img src={englishPreviewUrl} alt="English side preview" style={styles.preview} />
+        )}
+
+        {scanChineseNames && (
+          <>
+            <label style={styles.label}>Chinese-side business card photo</label>
+            <input
+              id="chinesePhoto"
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={(e) =>
+                handleChinesePhotoChange(e.target.files?.[0] || null)
+              }
+              style={styles.input}
+            />
+
+            {chinesePreviewUrl && (
+              <img
+                src={chinesePreviewUrl}
+                alt="Chinese side preview"
+                style={styles.preview}
+              />
+            )}
+          </>
         )}
 
         <button
@@ -392,6 +498,38 @@ const styles: Record<string, CSSProperties> = {
     background: "rgba(255, 255, 255, 0.94)",
     color: "#162032",
     outlineColor: "#4fc7bf",
+  },
+  checkboxRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 18,
+    padding: "13px 14px",
+    borderRadius: 16,
+    border: "1px solid rgba(20, 129, 180, 0.18)",
+    background: "rgba(255, 255, 255, 0.66)",
+    cursor: "pointer",
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    accentColor: "#0b7fb4",
+  },
+  checkboxText: {
+    fontWeight: 850,
+    color: "#223047",
+    fontSize: 15,
+  },
+  helperText: {
+    margin: "10px 0 0",
+    padding: "12px 13px",
+    borderRadius: 14,
+    background: "rgba(11, 127, 180, 0.09)",
+    color: "#0b5f89",
+    border: "1px solid rgba(11, 127, 180, 0.12)",
+    fontSize: 13,
+    lineHeight: 1.45,
+    fontWeight: 650,
   },
   button: {
     width: "100%",
