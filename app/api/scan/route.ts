@@ -26,6 +26,10 @@ type EnglishCard = {
   notes: string;
 };
 
+type BilingualEnglishCard = EnglishCard & {
+  chinese_name: string;
+};
+
 type ChineseCard = {
   position_index: number;
   chinese_name: string;
@@ -175,9 +179,10 @@ Image 2 is the Chinese-side photo.
 
 Task:
 1. From Image 1, extract the English-side business card information.
-2. From Image 2, extract the Traditional Chinese name and email address from each matching card.
-3. Do NOT combine the cards yourself. Return two separate arrays: english_cards and chinese_cards.
-4. The app will match cards by email first and position second.
+2. From Image 1, also extract the Traditional Chinese name if it is printed on the same side as the English/romanized name.
+3. From Image 2, extract the Traditional Chinese name and email address from each matching card.
+4. Do NOT combine the cards yourself. Return two separate arrays: english_cards and chinese_cards.
+5. The app will keep Chinese names found on Image 1 first, then use Image 2 to fill in missing Chinese names.
 
 Rules for english_cards:
 - One object per visible English-side card.
@@ -185,6 +190,9 @@ Rules for english_cards:
 - Prioritize office phone over mobile phone if both are listed.
 - If a field is unreadable or missing, use an empty string.
 - Split romanized/English names into first_name and last_name.
+- If a Traditional Chinese person name appears on the same side, put it in chinese_name.
+- Do not put company names, departments, addresses, titles, or honorifics in chinese_name.
+- If no Traditional Chinese person name is visible on Image 1 for that card, use an empty string for chinese_name.
 - Organization type must be exactly one of:
   Academic, NPO/Think tank, Corporate, Foreign Representative, Taiwan Government Rep, Media.
 - Classify universities and research institutes as Academic unless clearly a think tank/NPO.
@@ -210,7 +218,7 @@ Rules for chinese_cards:
     properties: {
       english_cards: {
         type: "array",
-        items: englishCardSchema(),
+        items: bilingualEnglishCardSchema(),
       },
       chinese_cards: {
         type: "array",
@@ -269,6 +277,40 @@ function englishCardSchema() {
       position_index: { type: "integer" },
       first_name: { type: "string" },
       last_name: { type: "string" },
+      title: { type: "string" },
+      affiliation: { type: "string" },
+      email: { type: "string" },
+      phone: { type: "string" },
+      organization_type: {
+        type: "string",
+        enum: [...ORG_TYPES],
+      },
+      notes: { type: "string" },
+    },
+  };
+}
+
+function bilingualEnglishCardSchema() {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "position_index",
+      "first_name",
+      "last_name",
+      "chinese_name",
+      "title",
+      "affiliation",
+      "email",
+      "phone",
+      "organization_type",
+      "notes",
+    ],
+    properties: {
+      position_index: { type: "integer" },
+      first_name: { type: "string" },
+      last_name: { type: "string" },
+      chinese_name: { type: "string" },
       title: { type: "string" },
       affiliation: { type: "string" },
       email: { type: "string" },
@@ -350,7 +392,7 @@ async function callOpenAIForJson({
 }
 
 function mergeEnglishAndChineseCards(
-  englishCards: EnglishCard[],
+  englishCards: Array<EnglishCard | BilingualEnglishCard>,
   chineseCards: ChineseCard[]
 ): FinalCard[] {
   const chineseByEmail = new Map<string, ChineseCard>();
@@ -388,9 +430,12 @@ function mergeEnglishAndChineseCards(
       usedChineseCards.add(matchedChineseCard);
     }
 
+    const sameSideChineseName =
+      "chinese_name" in englishCard ? clean(englishCard.chinese_name) : "";
+
     return {
       ...englishCard,
-      chinese_name: clean(matchedChineseCard?.chinese_name),
+      chinese_name: sameSideChineseName || clean(matchedChineseCard?.chinese_name),
     };
   });
 }

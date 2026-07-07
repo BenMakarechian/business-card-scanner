@@ -239,9 +239,9 @@ export default function Page() {
 
         {scanChineseNames && (
           <p style={styles.helperText}>
-            Take the English-side photo first. Then flip the same cards and take
-            the Chinese-side photo. The app will match Chinese names using email
-            addresses when possible, then position/order as a fallback.
+            Take the English-side photo first. If Chinese names are visible
+            there, they will be recorded. Then flip the same cards and take the
+            Chinese-side photo to fill in any missing Chinese names.
           </p>
         )}
 
