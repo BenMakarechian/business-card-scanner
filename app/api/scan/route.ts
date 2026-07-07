@@ -18,16 +18,13 @@ type EnglishCard = {
   position_index: number;
   first_name: string;
   last_name: string;
+  chinese_name: string;
   title: string;
   affiliation: string;
   email: string;
   phone: string;
   organization_type: string;
   notes: string;
-};
-
-type BilingualEnglishCard = EnglishCard & {
-  chinese_name: string;
 };
 
 type ChineseCard = {
@@ -37,9 +34,7 @@ type ChineseCard = {
   notes: string;
 };
 
-type FinalCard = EnglishCard & {
-  chinese_name: string;
-};
+type FinalCard = EnglishCard;
 
 export async function POST(request: Request) {
   try {
@@ -127,6 +122,7 @@ Rules:
 - Prioritize office phone over mobile phone if both are listed.
 - If a field is unreadable or missing, use an empty string.
 - Split names into first_name and last_name.
+- Use an empty string for chinese_name.
 - Organization type must be exactly one of:
   Academic, NPO/Think tank, Corporate, Foreign Representative, Taiwan Government Rep, Media.
 - Classify universities and research institutes as Academic unless clearly a think tank/NPO.
@@ -218,7 +214,7 @@ Rules for chinese_cards:
     properties: {
       english_cards: {
         type: "array",
-        items: bilingualEnglishCardSchema(),
+        items: englishCardSchema(),
       },
       chinese_cards: {
         type: "array",
@@ -259,38 +255,6 @@ Rules for chinese_cards:
 }
 
 function englishCardSchema() {
-  return {
-    type: "object",
-    additionalProperties: false,
-    required: [
-      "position_index",
-      "first_name",
-      "last_name",
-      "title",
-      "affiliation",
-      "email",
-      "phone",
-      "organization_type",
-      "notes",
-    ],
-    properties: {
-      position_index: { type: "integer" },
-      first_name: { type: "string" },
-      last_name: { type: "string" },
-      title: { type: "string" },
-      affiliation: { type: "string" },
-      email: { type: "string" },
-      phone: { type: "string" },
-      organization_type: {
-        type: "string",
-        enum: [...ORG_TYPES],
-      },
-      notes: { type: "string" },
-    },
-  };
-}
-
-function bilingualEnglishCardSchema() {
   return {
     type: "object",
     additionalProperties: false,
@@ -392,7 +356,7 @@ async function callOpenAIForJson({
 }
 
 function mergeEnglishAndChineseCards(
-  englishCards: Array<EnglishCard | BilingualEnglishCard>,
+  englishCards: EnglishCard[],
   chineseCards: ChineseCard[]
 ): FinalCard[] {
   const chineseByEmail = new Map<string, ChineseCard>();
@@ -430,12 +394,12 @@ function mergeEnglishAndChineseCards(
       usedChineseCards.add(matchedChineseCard);
     }
 
-    const sameSideChineseName =
-      "chinese_name" in englishCard ? clean(englishCard.chinese_name) : "";
+    const sameSideChineseName = clean(englishCard.chinese_name);
 
     return {
       ...englishCard,
-      chinese_name: sameSideChineseName || clean(matchedChineseCard?.chinese_name),
+      chinese_name:
+        sameSideChineseName || clean(matchedChineseCard?.chinese_name),
     };
   });
 }
