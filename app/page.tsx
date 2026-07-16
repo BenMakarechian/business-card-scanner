@@ -3,6 +3,43 @@
 import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 
+type ScanCard = {
+  position_index: number;
+  first_name: string;
+  last_name: string;
+  chinese_name: string;
+  title: string;
+  affiliation: string;
+  email: string;
+  phone: string;
+  organization_type: string;
+  notes: string;
+};
+
+type DuplicateMatch = {
+  sheetName: string;
+  rowNumber: number;
+  reasons: string[];
+  existing: {
+    timestamp: string;
+    first_name: string;
+    last_name: string;
+    chinese_name: string;
+    title: string;
+    affiliation: string;
+    email: string;
+    phone: string;
+  };
+};
+
+type DuplicateReview = {
+  cardIndex: number;
+  card: ScanCard;
+  matches: DuplicateMatch[];
+};
+
+type DuplicateDecision = "add" | "ignore";
+
 export default function Page() {
   const [language, setLanguage] = useState("English");
   const [sourceName, setSourceName] = useState("");
@@ -20,6 +57,13 @@ export default function Page() {
     "neutral"
   );
   const [isLoading, setIsLoading] = useState(false);
+  const [pendingCards, setPendingCards] = useState<ScanCard[]>([]);
+  const [duplicateReviews, setDuplicateReviews] = useState<DuplicateReview[]>(
+    []
+  );
+  const [duplicateDecisions, setDuplicateDecisions] = useState<
+    Record<number, DuplicateDecision>
+  >({});
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [targetSheetId, setTargetSheetId] = useState("");
@@ -105,22 +149,75 @@ export default function Page() {
         throw new Error(data.error || "Unknown error.");
       }
 
+      if (data.needsDuplicateReview) {
+        const reviews: DuplicateReview[] = data.duplicateReviews || [];
+        const initialDecisions: Record<number, DuplicateDecision> = {};
+
+        reviews.forEach((review) => {
+          initialDecisions[review.cardIndex] = "ignore";
+        });
+
+        setPendingCards(data.cards || []);
+        setDuplicateReviews(reviews);
+        setDuplicateDecisions(initialDecisions);
+        showNeutral(
+          `${reviews.length} possible duplicate ${
+            reviews.length === 1 ? "card needs" : "cards need"
+          } review before saving.`
+        );
+        return;
+      }
+
       showSuccess(`Successfully added ${data.added} cards`);
+      clearPendingDuplicateReview();
+      resetPhotos();
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        showError(err.message);
+      } else {
+        showError(String(err));
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }
 
-      setEnglishPhoto(null);
-      setChinesePhoto(null);
-      setEnglishPreviewUrl("");
-      setChinesePreviewUrl("");
+  async function handleDuplicateReviewSubmit() {
+    try {
+      const duplicateCardIndexes = new Set(
+        duplicateReviews.map((review) => review.cardIndex)
+      );
+      const approvedCards = pendingCards.filter((card, index) => {
+        if (!duplicateCardIndexes.has(index)) return true;
+        return duplicateDecisions[index] === "add";
+      });
 
-      const englishInput = document.getElementById(
-        "englishPhoto"
-      ) as HTMLInputElement;
-      if (englishInput) englishInput.value = "";
+      setIsLoading(true);
+      showNeutral("Saving approved cards.");
 
-      const chineseInput = document.getElementById(
-        "chinesePhoto"
-      ) as HTMLInputElement;
-      if (chineseInput) chineseInput.value = "";
+      const response = await fetch("/api/scan", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          preferredLanguage: language,
+          sourceName: sourceName.trim(),
+          approvedCards,
+          targetSheetId: targetSheetId.trim(),
+          targetSheetName: targetSheetName.trim(),
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || "Unknown error.");
+      }
+
+      showSuccess(`Successfully added ${data.added} cards`);
+      clearPendingDuplicateReview();
+      resetPhotos();
     } catch (err: unknown) {
       if (err instanceof Error) {
         showError(err.message);
@@ -134,6 +231,7 @@ export default function Page() {
 
   function handleEnglishPhotoChange(file: File | null) {
     setEnglishPhoto(file);
+    clearPendingDuplicateReview();
 
     if (!file) {
       setEnglishPreviewUrl("");
@@ -146,6 +244,7 @@ export default function Page() {
 
   function handleChinesePhotoChange(file: File | null) {
     setChinesePhoto(file);
+    clearPendingDuplicateReview();
 
     if (!file) {
       setChinesePreviewUrl("");
@@ -158,6 +257,7 @@ export default function Page() {
 
   function handleScanChineseNamesChange(checked: boolean) {
     setScanChineseNames(checked);
+    clearPendingDuplicateReview();
 
     if (!checked) {
       setChinesePhoto(null);
@@ -168,6 +268,39 @@ export default function Page() {
       ) as HTMLInputElement;
       if (chineseInput) chineseInput.value = "";
     }
+  }
+
+  function updateDuplicateDecision(
+    cardIndex: number,
+    decision: DuplicateDecision
+  ) {
+    setDuplicateDecisions((current) => ({
+      ...current,
+      [cardIndex]: decision,
+    }));
+  }
+
+  function clearPendingDuplicateReview() {
+    setPendingCards([]);
+    setDuplicateReviews([]);
+    setDuplicateDecisions({});
+  }
+
+  function resetPhotos() {
+    setEnglishPhoto(null);
+    setChinesePhoto(null);
+    setEnglishPreviewUrl("");
+    setChinesePreviewUrl("");
+
+    const englishInput = document.getElementById(
+      "englishPhoto"
+    ) as HTMLInputElement;
+    if (englishInput) englishInput.value = "";
+
+    const chineseInput = document.getElementById(
+      "chinesePhoto"
+    ) as HTMLInputElement;
+    if (chineseInput) chineseInput.value = "";
   }
 
   function showNeutral(message: string) {
@@ -289,14 +422,103 @@ export default function Page() {
 
         <button
           onClick={handleSubmit}
-          disabled={isLoading}
+          disabled={isLoading || duplicateReviews.length > 0}
           style={{
             ...styles.button,
-            opacity: isLoading ? 0.65 : 1,
+            opacity: isLoading || duplicateReviews.length > 0 ? 0.65 : 1,
           }}
         >
-          {isLoading ? "Scanning..." : "Scan and Add Cards"}
+          {isLoading
+            ? "Scanning..."
+            : duplicateReviews.length > 0
+            ? "Review Possible Duplicates"
+            : "Scan and Add Cards"}
         </button>
+
+        {duplicateReviews.length > 0 && (
+          <section style={styles.duplicatePanel}>
+            <h2 style={styles.duplicateTitle}>Possible duplicates</h2>
+            <p style={styles.duplicateIntro}>
+              These scanned cards look similar to records already in the
+              spreadsheet. Choose whether each one should still be added.
+            </p>
+
+            {duplicateReviews.map((review) => (
+              <div key={review.cardIndex} style={styles.duplicateCard}>
+                <div style={styles.scannedCardName}>
+                  {formatCardName(review.card)}
+                </div>
+                <div style={styles.scannedCardMeta}>
+                  {[review.card.chinese_name, review.card.affiliation, review.card.email]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </div>
+
+                {review.matches.map((match) => (
+                  <div
+                    key={`${match.sheetName}-${match.rowNumber}`}
+                    style={styles.matchRow}
+                  >
+                    <div style={styles.matchHeader}>
+                      {formatExistingName(match.existing)}
+                    </div>
+                    <div style={styles.matchMeta}>
+                      {[match.existing.chinese_name, match.existing.affiliation, match.existing.email]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </div>
+                    <div style={styles.matchLocation}>
+                      {match.sheetName} row {match.rowNumber} ·{" "}
+                      {match.reasons.join(", ")}
+                    </div>
+                  </div>
+                ))}
+
+                <div style={styles.decisionRow}>
+                  <button
+                    type="button"
+                    onClick={() => updateDuplicateDecision(review.cardIndex, "add")}
+                    style={{
+                      ...styles.decisionButton,
+                      ...(duplicateDecisions[review.cardIndex] === "add"
+                        ? styles.decisionButtonActive
+                        : {}),
+                    }}
+                  >
+                    Add anyway
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateDuplicateDecision(review.cardIndex, "ignore")
+                    }
+                    style={{
+                      ...styles.decisionButton,
+                      ...(duplicateDecisions[review.cardIndex] === "ignore"
+                        ? styles.decisionButtonActive
+                        : {}),
+                    }}
+                  >
+                    Ignore
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            <button
+              type="button"
+              onClick={handleDuplicateReviewSubmit}
+              disabled={isLoading}
+              style={{
+                ...styles.button,
+                marginTop: 16,
+                opacity: isLoading ? 0.65 : 1,
+              }}
+            >
+              {isLoading ? "Saving..." : "Save Approved Cards"}
+            </button>
+          </section>
+        )}
 
         {status && (
           <div
@@ -406,6 +628,16 @@ function loadImage(src: string): Promise<HTMLImageElement> {
     img.onerror = () => reject(new Error("Could not load image."));
     img.src = src;
   });
+}
+
+function formatCardName(card: ScanCard) {
+  const name = `${card.first_name} ${card.last_name}`.trim();
+  return name || card.chinese_name || "Unnamed card";
+}
+
+function formatExistingName(existing: DuplicateMatch["existing"]) {
+  const name = `${existing.first_name} ${existing.last_name}`.trim();
+  return name || existing.chinese_name || "Existing record";
 }
 
 const styles: Record<string, CSSProperties> = {
@@ -590,6 +822,93 @@ const styles: Record<string, CSSProperties> = {
     color: "#667085",
     marginTop: 18,
     lineHeight: 1.45,
+  },
+  duplicatePanel: {
+    marginTop: 18,
+    padding: 14,
+    borderRadius: 18,
+    background: "rgba(255, 255, 255, 0.72)",
+    border: "1px solid rgba(157, 28, 28, 0.14)",
+  },
+  duplicateTitle: {
+    margin: "0 0 6px",
+    fontSize: 18,
+    color: "#9d1c1c",
+    letterSpacing: 0,
+  },
+  duplicateIntro: {
+    margin: "0 0 12px",
+    color: "#5b6472",
+    fontSize: 13,
+    lineHeight: 1.45,
+    fontWeight: 650,
+  },
+  duplicateCard: {
+    padding: 12,
+    borderRadius: 8,
+    background: "rgba(255, 255, 255, 0.9)",
+    border: "1px solid rgba(20, 129, 180, 0.15)",
+    marginTop: 12,
+  },
+  scannedCardName: {
+    fontSize: 15,
+    fontWeight: 900,
+    color: "#223047",
+    lineHeight: 1.25,
+  },
+  scannedCardMeta: {
+    marginTop: 4,
+    fontSize: 12,
+    color: "#667085",
+    lineHeight: 1.35,
+    overflowWrap: "anywhere",
+  },
+  matchRow: {
+    marginTop: 10,
+    padding: 10,
+    borderRadius: 8,
+    background: "rgba(11, 127, 180, 0.07)",
+    border: "1px solid rgba(11, 127, 180, 0.12)",
+  },
+  matchHeader: {
+    fontSize: 14,
+    fontWeight: 850,
+    color: "#0b5f89",
+  },
+  matchMeta: {
+    marginTop: 4,
+    fontSize: 12,
+    color: "#4f5a6b",
+    lineHeight: 1.35,
+    overflowWrap: "anywhere",
+  },
+  matchLocation: {
+    marginTop: 6,
+    fontSize: 12,
+    color: "#9d1c1c",
+    fontWeight: 750,
+    lineHeight: 1.35,
+  },
+  decisionRow: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: 8,
+    marginTop: 12,
+  },
+  decisionButton: {
+    padding: "11px 8px",
+    borderRadius: 8,
+    border: "1px solid rgba(20, 129, 180, 0.22)",
+    background: "rgba(255, 255, 255, 0.92)",
+    color: "#0d5f8c",
+    fontSize: 14,
+    fontWeight: 900,
+    cursor: "pointer",
+  },
+  decisionButtonActive: {
+    background: "#0b7fb4",
+    color: "white",
+    border: "1px solid #0b7fb4",
   },
   modalBackdrop: {
     position: "fixed",

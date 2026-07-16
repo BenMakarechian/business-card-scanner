@@ -36,9 +36,55 @@ type ChineseCard = {
 
 type FinalCard = EnglishCard;
 
+type DuplicateMatch = {
+  sheetName: string;
+  rowNumber: number;
+  reasons: string[];
+  existing: {
+    timestamp: string;
+    first_name: string;
+    last_name: string;
+    chinese_name: string;
+    title: string;
+    affiliation: string;
+    email: string;
+    phone: string;
+  };
+};
+
+type DuplicateReview = {
+  cardIndex: number;
+  card: FinalCard;
+  matches: DuplicateMatch[];
+};
+
+type SheetsContext = {
+  spreadsheetId: string;
+  sheetName: string;
+  sheets: ReturnType<typeof google.sheets>;
+};
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
+
+    if (Array.isArray(body.approvedCards)) {
+      const approvedCards = body.approvedCards.map(normalizeCardFromBody);
+
+      await appendCardsToSheet({
+        cards: approvedCards,
+        preferredLanguage: normalizeLanguage(body.preferredLanguage),
+        sourceName: clean(body.sourceName),
+        targetSheetId: clean(body.targetSheetId),
+        targetSheetName: clean(body.targetSheetName),
+      });
+
+      return Response.json({
+        ok: true,
+        added: approvedCards.length,
+        cards: approvedCards,
+      });
+    }
 
     if (!process.env.OPENAI_API_KEY) {
       throw new Error("Missing OPENAI_API_KEY.");
@@ -80,6 +126,22 @@ export async function POST(request: Request) {
         ...card,
         chinese_name: "",
       }));
+    }
+
+    const duplicateReviews = await findDuplicateReviews({
+      cards,
+      targetSheetId: clean(body.targetSheetId),
+      targetSheetName: clean(body.targetSheetName),
+    });
+
+    if (duplicateReviews.length > 0) {
+      return Response.json({
+        ok: true,
+        needsDuplicateReview: true,
+        added: 0,
+        cards,
+        duplicateReviews,
+      });
     }
 
     await appendCardsToSheet({
@@ -404,6 +466,191 @@ function mergeEnglishAndChineseCards(
   });
 }
 
+async function findDuplicateReviews({
+  cards,
+  targetSheetId,
+  targetSheetName,
+}: {
+  cards: FinalCard[];
+  targetSheetId: string;
+  targetSheetName: string;
+}): Promise<DuplicateReview[]> {
+  const context = getSheetsContext({ targetSheetId, targetSheetName });
+  const existingRecords = await loadExistingSheetRecords(context);
+
+  return cards
+    .map((card, cardIndex) => ({
+      cardIndex,
+      card,
+      matches: findDuplicateMatches(card, existingRecords).slice(0, 4),
+    }))
+    .filter((review) => review.matches.length > 0);
+}
+
+async function loadExistingSheetRecords(context: SheetsContext) {
+  const spreadsheet = await context.sheets.spreadsheets.get({
+    spreadsheetId: context.spreadsheetId,
+    fields: "sheets.properties.title",
+  });
+
+  const sheetNames =
+    spreadsheet.data.sheets
+      ?.map((sheet) => clean(sheet.properties?.title))
+      .filter(Boolean) || [];
+
+  if (sheetNames.length === 0) return [];
+
+  const ranges = sheetNames.map((sheetName) => `${quoteSheetName(sheetName)}!A:K`);
+  const response = await context.sheets.spreadsheets.values.batchGet({
+    spreadsheetId: context.spreadsheetId,
+    ranges,
+    majorDimension: "ROWS",
+  });
+
+  const records: Array<{
+    sheetName: string;
+    rowNumber: number;
+    timestamp: string;
+    first_name: string;
+    last_name: string;
+    chinese_name: string;
+    title: string;
+    affiliation: string;
+    email: string;
+    phone: string;
+  }> = [];
+
+  for (const valueRange of response.data.valueRanges || []) {
+    const sheetName = getSheetNameFromRange(valueRange.range || "");
+    const rows = valueRange.values || [];
+
+    rows.forEach((row, index) => {
+      const record = {
+        sheetName,
+        rowNumber: index + 1,
+        timestamp: clean(row[0]),
+        first_name: clean(row[1]),
+        last_name: clean(row[2]),
+        chinese_name: clean(row[3]),
+        title: clean(row[4]),
+        affiliation: clean(row[5]),
+        email: clean(row[6]),
+        phone: clean(row[7]),
+      };
+
+      if (
+        record.first_name ||
+        record.last_name ||
+        record.chinese_name ||
+        record.email ||
+        record.phone
+      ) {
+        records.push(record);
+      }
+    });
+  }
+
+  return records;
+}
+
+function findDuplicateMatches(
+  card: FinalCard,
+  records: Awaited<ReturnType<typeof loadExistingSheetRecords>>
+): DuplicateMatch[] {
+  const matches: Array<DuplicateMatch & { score: number }> = [];
+
+  for (const record of records) {
+    const reasons = getDuplicateReasons(card, record);
+
+    if (reasons.length === 0) continue;
+
+    matches.push({
+      sheetName: record.sheetName,
+      rowNumber: record.rowNumber,
+      reasons,
+      score: scoreDuplicateReasons(reasons),
+      existing: {
+        timestamp: record.timestamp,
+        first_name: record.first_name,
+        last_name: record.last_name,
+        chinese_name: record.chinese_name,
+        title: record.title,
+        affiliation: record.affiliation,
+        email: record.email,
+        phone: record.phone,
+      },
+    });
+  }
+
+  return matches
+    .sort((a, b) => b.score - a.score)
+    .map(({ score, ...match }) => match);
+}
+
+function getDuplicateReasons(
+  card: FinalCard,
+  record: Awaited<ReturnType<typeof loadExistingSheetRecords>>[number]
+) {
+  const reasons: string[] = [];
+
+  const cardEmail = normalizeEmail(card.email);
+  const recordEmail = normalizeEmail(record.email);
+  const cardPhone = normalizePhone(card.phone);
+  const recordPhone = normalizePhone(record.phone);
+  const cardChineseName = normalizeLooseText(card.chinese_name);
+  const recordChineseName = normalizeLooseText(record.chinese_name);
+  const cardName = normalizePersonName(card.first_name, card.last_name);
+  const recordName = normalizePersonName(record.first_name, record.last_name);
+  const cardAffiliation = normalizeLooseText(card.affiliation);
+  const recordAffiliation = normalizeLooseText(record.affiliation);
+
+  if (cardEmail && recordEmail && cardEmail === recordEmail) {
+    reasons.push("same email");
+  }
+
+  if (phonesLookSimilar(cardPhone, recordPhone)) {
+    reasons.push("same phone");
+  }
+
+  if (
+    cardChineseName &&
+    recordChineseName &&
+    cardChineseName === recordChineseName
+  ) {
+    reasons.push("same Chinese name");
+  }
+
+  if (cardName && recordName) {
+    const nameSimilarity = similarity(cardName, recordName);
+    const affiliationSimilarity =
+      cardAffiliation && recordAffiliation
+        ? similarity(cardAffiliation, recordAffiliation)
+        : 0;
+
+    if (cardName === recordName && affiliationSimilarity >= 0.72) {
+      reasons.push("same name and organization");
+    } else if (nameSimilarity >= 0.9 && affiliationSimilarity >= 0.78) {
+      reasons.push("similar name and organization");
+    } else if (cardName === recordName && (cardEmail || recordEmail)) {
+      reasons.push("same name");
+    }
+  }
+
+  return reasons;
+}
+
+function scoreDuplicateReasons(reasons: string[]) {
+  return reasons.reduce((score, reason) => {
+    if (reason === "same email") return score + 100;
+    if (reason === "same phone") return score + 85;
+    if (reason === "same Chinese name") return score + 70;
+    if (reason === "same name and organization") return score + 65;
+    if (reason === "similar name and organization") return score + 50;
+    if (reason === "same name") return score + 30;
+    return score + 10;
+  }, 0);
+}
+
 async function appendCardsToSheet({
   cards,
   preferredLanguage,
@@ -417,6 +664,44 @@ async function appendCardsToSheet({
   targetSheetId: string;
   targetSheetName: string;
 }) {
+  const context = getSheetsContext({ targetSheetId, targetSheetName });
+
+  const timestamp = formatTimestamp();
+
+  const rows = cards.map((card) => [
+    timestamp,
+    clean(card.first_name),
+    clean(card.last_name),
+    clean(card.chinese_name),
+    clean(card.title),
+    clean(card.affiliation),
+    clean(card.email),
+    clean(card.phone),
+    normalizeOrgType(card.organization_type),
+    preferredLanguage,
+    sourceName,
+  ]);
+
+  if (rows.length === 0) return;
+
+  await context.sheets.spreadsheets.values.append({
+    spreadsheetId: context.spreadsheetId,
+    range: `${quoteSheetName(context.sheetName)}!A:K`,
+    valueInputOption: "USER_ENTERED",
+    insertDataOption: "INSERT_ROWS",
+    requestBody: {
+      values: rows,
+    },
+  });
+}
+
+function getSheetsContext({
+  targetSheetId,
+  targetSheetName,
+}: {
+  targetSheetId: string;
+  targetSheetName: string;
+}): SheetsContext {
   const spreadsheetId = targetSheetId || process.env.GOOGLE_SHEET_ID || "";
   const sheetName = targetSheetName || process.env.SHEET_NAME || "Sheet1";
 
@@ -444,35 +729,28 @@ async function appendCardsToSheet({
     scopes: ["https://www.googleapis.com/auth/spreadsheets"],
   });
 
-  const sheets = google.sheets({ version: "v4", auth });
-
-  const timestamp = formatTimestamp();
-
-  const rows = cards.map((card) => [
-    timestamp,
-    clean(card.first_name),
-    clean(card.last_name),
-    clean(card.chinese_name),
-    clean(card.title),
-    clean(card.affiliation),
-    clean(card.email),
-    clean(card.phone),
-    normalizeOrgType(card.organization_type),
-    preferredLanguage,
-    sourceName,
-  ]);
-
-  if (rows.length === 0) return;
-
-  await sheets.spreadsheets.values.append({
+  return {
     spreadsheetId,
-    range: `${quoteSheetName(sheetName)}!A:K`,
-    valueInputOption: "USER_ENTERED",
-    insertDataOption: "INSERT_ROWS",
-    requestBody: {
-      values: rows,
-    },
-  });
+    sheetName,
+    sheets: google.sheets({ version: "v4", auth }),
+  };
+}
+
+function normalizeCardFromBody(value: unknown): FinalCard {
+  const card = (value || {}) as Partial<FinalCard>;
+
+  return {
+    position_index: Number(card.position_index) || 0,
+    first_name: clean(card.first_name),
+    last_name: clean(card.last_name),
+    chinese_name: clean(card.chinese_name),
+    title: clean(card.title),
+    affiliation: clean(card.affiliation),
+    email: clean(card.email),
+    phone: clean(card.phone),
+    organization_type: normalizeOrgType(clean(card.organization_type)),
+    notes: clean(card.notes),
+  };
 }
 
 function makeImageDataUrl(imageBase64: string, mimeType: string) {
@@ -550,8 +828,78 @@ function normalizeEmail(value: string) {
     .replace(/[<>]/g, "");
 }
 
+function normalizePhone(value: string) {
+  return clean(value).replace(/\D/g, "");
+}
+
+function normalizeLooseText(value: string) {
+  return clean(value)
+    .toLowerCase()
+    .normalize("NFKC")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+function normalizePersonName(firstName: string, lastName: string) {
+  return normalizeLooseText(`${firstName} ${lastName}`);
+}
+
+function phonesLookSimilar(firstPhone: string, secondPhone: string) {
+  if (firstPhone.length < 7 || secondPhone.length < 7) return false;
+
+  if (firstPhone === secondPhone) return true;
+
+  const firstLastDigits = firstPhone.slice(-7);
+  const secondLastDigits = secondPhone.slice(-7);
+
+  return firstLastDigits === secondLastDigits;
+}
+
+function similarity(firstValue: string, secondValue: string) {
+  if (!firstValue && !secondValue) return 1;
+  if (!firstValue || !secondValue) return 0;
+  if (firstValue === secondValue) return 1;
+
+  const distance = levenshteinDistance(firstValue, secondValue);
+  return 1 - distance / Math.max(firstValue.length, secondValue.length);
+}
+
+function levenshteinDistance(firstValue: string, secondValue: string) {
+  const previous = Array.from({ length: secondValue.length + 1 }, (_, i) => i);
+  const current = Array(secondValue.length + 1).fill(0);
+
+  for (let i = 1; i <= firstValue.length; i++) {
+    current[0] = i;
+
+    for (let j = 1; j <= secondValue.length; j++) {
+      const cost = firstValue[i - 1] === secondValue[j - 1] ? 0 : 1;
+
+      current[j] = Math.min(
+        current[j - 1] + 1,
+        previous[j] + 1,
+        previous[j - 1] + cost
+      );
+    }
+
+    for (let j = 0; j < previous.length; j++) {
+      previous[j] = current[j];
+    }
+  }
+
+  return previous[secondValue.length];
+}
+
 function isValidSheetId(value: string) {
   return /^[a-zA-Z0-9-_]{20,}$/.test(value);
+}
+
+function getSheetNameFromRange(value: string) {
+  const range = value.split("!")[0] || "";
+  const unquoted = range.startsWith("'") && range.endsWith("'")
+    ? range.slice(1, -1).replace(/''/g, "'")
+    : range;
+
+  return clean(unquoted);
 }
 
 function quoteSheetName(value: string) {
