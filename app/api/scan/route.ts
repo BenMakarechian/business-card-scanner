@@ -676,7 +676,7 @@ async function appendCardsToSheet({
     clean(card.title),
     clean(card.affiliation),
     clean(card.email),
-    clean(card.phone),
+    formatPhoneForSheet(card.phone),
     normalizeOrgType(card.organization_type),
     preferredLanguage,
     sourceName,
@@ -830,6 +830,14 @@ function normalizeEmail(value: string) {
 
 function normalizePhone(value: string) {
   return clean(value).replace(/\D/g, "");
+}
+
+function formatPhoneForSheet(value: string) {
+  const phone = clean(value);
+
+  if (!phone) return "";
+
+  return `'${phone}`;
 }
 
 function normalizeLooseText(value: string) {
