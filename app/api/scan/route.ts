@@ -689,12 +689,13 @@ async function appendCardsToSheet({
   if (rows.length === 0) return;
 
   const sheetName = await resolveAppendSheetName(context);
+  const startRow = await getNextWriteRow(context, sheetName);
+  const endRow = startRow + rows.length - 1;
 
-  await context.sheets.spreadsheets.values.append({
+  await context.sheets.spreadsheets.values.update({
     spreadsheetId: context.spreadsheetId,
-    range: `${quoteSheetName(sheetName)}!A:K`,
+    range: `${quoteSheetName(sheetName)}!A${startRow}:K${endRow}`,
     valueInputOption: "USER_ENTERED",
-    insertDataOption: "INSERT_ROWS",
     requestBody: {
       values: rows,
     },
@@ -780,6 +781,16 @@ async function resolveAppendSheetName(context: SheetsContext) {
   }
 
   return sheetNames[0];
+}
+
+async function getNextWriteRow(context: SheetsContext, sheetName: string) {
+  const response = await context.sheets.spreadsheets.values.get({
+    spreadsheetId: context.spreadsheetId,
+    range: `${quoteSheetName(sheetName)}!A:K`,
+    majorDimension: "ROWS",
+  });
+
+  return (response.data.values || []).length + 1;
 }
 
 function normalizeCardFromBody(value: unknown): FinalCard {
