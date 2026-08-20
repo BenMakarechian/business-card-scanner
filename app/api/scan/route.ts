@@ -12,6 +12,9 @@ const ORG_TYPES = [
   "Media",
 ] as const;
 
+const DEFAULT_GOOGLE_SHEET_ID =
+  "1Viy7WMI2UQFS6DuH2Sg0JOhlWt-a_ave8khLk5oTO1s";
+
 type OrgType = (typeof ORG_TYPES)[number];
 
 type EnglishCard = {
@@ -705,7 +708,11 @@ function getSheetsContext({
   targetSheetId: string;
   targetSheetName: string;
 }): SheetsContext {
-  const spreadsheetId = targetSheetId || process.env.GOOGLE_SHEET_ID || "";
+  const spreadsheetId =
+    targetSheetId ||
+    DEFAULT_GOOGLE_SHEET_ID ||
+    process.env.GOOGLE_SHEET_ID ||
+    "";
   const customSheetName = clean(targetSheetName);
   const sheetName = customSheetName || process.env.SHEET_NAME || "Sheet1";
 
