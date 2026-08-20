@@ -64,6 +64,8 @@ export default function Page() {
   const [duplicateDecisions, setDuplicateDecisions] = useState<
     Record<number, DuplicateDecision>
   >({});
+  const [activeDuplicateReviewIndex, setActiveDuplicateReviewIndex] =
+    useState(0);
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [targetSheetId, setTargetSheetId] = useState("");
@@ -151,15 +153,11 @@ export default function Page() {
 
       if (data.needsDuplicateReview) {
         const reviews: DuplicateReview[] = data.duplicateReviews || [];
-        const initialDecisions: Record<number, DuplicateDecision> = {};
-
-        reviews.forEach((review) => {
-          initialDecisions[review.cardIndex] = "ignore";
-        });
 
         setPendingCards(data.cards || []);
         setDuplicateReviews(reviews);
-        setDuplicateDecisions(initialDecisions);
+        setDuplicateDecisions({});
+        setActiveDuplicateReviewIndex(0);
         showNeutral(
           `${reviews.length} possible duplicate ${
             reviews.length === 1 ? "card needs" : "cards need"
@@ -182,15 +180,22 @@ export default function Page() {
     }
   }
 
-  async function handleDuplicateReviewSubmit() {
+  async function saveApprovedCards(decisions: Record<number, DuplicateDecision>) {
     try {
       const duplicateCardIndexes = new Set(
         duplicateReviews.map((review) => review.cardIndex)
       );
       const approvedCards = pendingCards.filter((card, index) => {
         if (!duplicateCardIndexes.has(index)) return true;
-        return duplicateDecisions[index] === "add";
+        return decisions[index] === "add";
       });
+
+      if (approvedCards.length === 0) {
+        showSuccess("No duplicate cards added");
+        clearPendingDuplicateReview();
+        resetPhotos();
+        return;
+      }
 
       setIsLoading(true);
       showNeutral("Saving approved cards.");
@@ -227,6 +232,31 @@ export default function Page() {
     } finally {
       setIsLoading(false);
     }
+  }
+
+  function handleDuplicateDecision(
+    cardIndex: number,
+    decision: DuplicateDecision
+  ) {
+    const nextDecisions = {
+      ...duplicateDecisions,
+      [cardIndex]: decision,
+    };
+    const nextReviewIndex = activeDuplicateReviewIndex + 1;
+
+    setDuplicateDecisions(nextDecisions);
+
+    if (nextReviewIndex < duplicateReviews.length) {
+      setActiveDuplicateReviewIndex(nextReviewIndex);
+      showNeutral(
+        `${duplicateReviews.length - nextReviewIndex} possible duplicate ${
+          duplicateReviews.length - nextReviewIndex === 1 ? "card" : "cards"
+        } left to review.`
+      );
+      return;
+    }
+
+    void saveApprovedCards(nextDecisions);
   }
 
   function handleEnglishPhotoChange(file: File | null) {
@@ -270,20 +300,11 @@ export default function Page() {
     }
   }
 
-  function updateDuplicateDecision(
-    cardIndex: number,
-    decision: DuplicateDecision
-  ) {
-    setDuplicateDecisions((current) => ({
-      ...current,
-      [cardIndex]: decision,
-    }));
-  }
-
   function clearPendingDuplicateReview() {
     setPendingCards([]);
     setDuplicateReviews([]);
     setDuplicateDecisions({});
+    setActiveDuplicateReviewIndex(0);
   }
 
   function resetPhotos() {
@@ -317,6 +338,8 @@ export default function Page() {
     setStatusType("error");
     setStatus(message);
   }
+
+  const activeDuplicateReview = duplicateReviews[activeDuplicateReviewIndex];
 
   return (
     <main style={styles.page}>
@@ -435,7 +458,7 @@ export default function Page() {
             : "Scan and Add Cards"}
         </button>
 
-        {duplicateReviews.length > 0 && (
+        {activeDuplicateReview && (
           <section style={styles.duplicatePanel}>
             <h2 style={styles.duplicateTitle}>Possible duplicates</h2>
             <p style={styles.duplicateIntro}>
@@ -443,80 +466,87 @@ export default function Page() {
               spreadsheet. Choose whether each one should still be added.
             </p>
 
-            {duplicateReviews.map((review) => (
-              <div key={review.cardIndex} style={styles.duplicateCard}>
-                <div style={styles.scannedCardName}>
-                  {formatCardName(review.card)}
-                </div>
-                <div style={styles.scannedCardMeta}>
-                  {[review.card.chinese_name, review.card.affiliation, review.card.email]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </div>
+            <div style={styles.reviewProgress}>
+              Card {activeDuplicateReviewIndex + 1} of {duplicateReviews.length}
+            </div>
 
-                {review.matches.map((match) => (
-                  <div
-                    key={`${match.sheetName}-${match.rowNumber}`}
-                    style={styles.matchRow}
-                  >
-                    <div style={styles.matchHeader}>
-                      {formatExistingName(match.existing)}
-                    </div>
-                    <div style={styles.matchMeta}>
-                      {[match.existing.chinese_name, match.existing.affiliation, match.existing.email]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </div>
-                    <div style={styles.matchLocation}>
-                      {match.sheetName} row {match.rowNumber} ·{" "}
-                      {match.reasons.join(", ")}
-                    </div>
-                  </div>
-                ))}
-
-                <div style={styles.decisionRow}>
-                  <button
-                    type="button"
-                    onClick={() => updateDuplicateDecision(review.cardIndex, "add")}
-                    style={{
-                      ...styles.decisionButton,
-                      ...(duplicateDecisions[review.cardIndex] === "add"
-                        ? styles.decisionButtonActive
-                        : {}),
-                    }}
-                  >
-                    Add anyway
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      updateDuplicateDecision(review.cardIndex, "ignore")
-                    }
-                    style={{
-                      ...styles.decisionButton,
-                      ...(duplicateDecisions[review.cardIndex] === "ignore"
-                        ? styles.decisionButtonActive
-                        : {}),
-                    }}
-                  >
-                    Ignore
-                  </button>
-                </div>
-              </div>
-            ))}
-
-            <button
-              type="button"
-              onClick={handleDuplicateReviewSubmit}
-              disabled={isLoading}
-              style={{
-                ...styles.button,
-                marginTop: 16,
-                opacity: isLoading ? 0.65 : 1,
-              }}
+            <div
+              key={activeDuplicateReview.cardIndex}
+              style={styles.duplicateCard}
             >
-              {isLoading ? "Saving..." : "Save Approved Cards"}
-            </button>
+              <div style={styles.scannedCardName}>
+                {formatCardName(activeDuplicateReview.card)}
+              </div>
+              <div style={styles.scannedCardMeta}>
+                {[
+                  activeDuplicateReview.card.chinese_name,
+                  activeDuplicateReview.card.affiliation,
+                  activeDuplicateReview.card.email,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </div>
+
+              {activeDuplicateReview.matches.map((match) => (
+                <div
+                  key={`${match.sheetName}-${match.rowNumber}`}
+                  style={styles.matchRow}
+                >
+                  <div style={styles.matchHeader}>
+                    {formatExistingName(match.existing)}
+                  </div>
+                  <div style={styles.matchMeta}>
+                    {[
+                      match.existing.chinese_name,
+                      match.existing.affiliation,
+                      match.existing.email,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </div>
+                  <div style={styles.matchLocation}>
+                    {match.sheetName} row {match.rowNumber} ·{" "}
+                    {match.reasons.join(", ")}
+                  </div>
+                </div>
+              ))}
+
+              <div style={styles.decisionRow}>
+                <button
+                  type="button"
+                  disabled={isLoading}
+                  onClick={() =>
+                    handleDuplicateDecision(
+                      activeDuplicateReview.cardIndex,
+                      "add"
+                    )
+                  }
+                  style={{
+                    ...styles.decisionButton,
+                    opacity: isLoading ? 0.65 : 1,
+                  }}
+                >
+                  Add anyways
+                </button>
+                <button
+                  type="button"
+                  disabled={isLoading}
+                  onClick={() =>
+                    handleDuplicateDecision(
+                      activeDuplicateReview.cardIndex,
+                      "ignore"
+                    )
+                  }
+                  style={{
+                    ...styles.decisionButton,
+                    ...styles.dontAddButton,
+                    opacity: isLoading ? 0.65 : 1,
+                  }}
+                >
+                  Don&apos;t add
+                </button>
+              </div>
+            </div>
           </section>
         )}
 
@@ -843,6 +873,12 @@ const styles: Record<string, CSSProperties> = {
     lineHeight: 1.45,
     fontWeight: 650,
   },
+  reviewProgress: {
+    color: "#9d1c1c",
+    fontSize: 12,
+    fontWeight: 850,
+    marginBottom: 10,
+  },
   duplicateCard: {
     padding: 12,
     borderRadius: 8,
@@ -905,10 +941,9 @@ const styles: Record<string, CSSProperties> = {
     fontWeight: 900,
     cursor: "pointer",
   },
-  decisionButtonActive: {
-    background: "#0b7fb4",
-    color: "white",
-    border: "1px solid #0b7fb4",
+  dontAddButton: {
+    color: "#9d1c1c",
+    border: "1px solid rgba(157, 28, 28, 0.22)",
   },
   modalBackdrop: {
     position: "fixed",
