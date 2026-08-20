@@ -61,6 +61,7 @@ type DuplicateReview = {
 type SheetsContext = {
   spreadsheetId: string;
   sheetName: string;
+  hasCustomSheetName: boolean;
   sheets: ReturnType<typeof google.sheets>;
 };
 
@@ -684,9 +685,11 @@ async function appendCardsToSheet({
 
   if (rows.length === 0) return;
 
+  const sheetName = await resolveAppendSheetName(context);
+
   await context.sheets.spreadsheets.values.append({
     spreadsheetId: context.spreadsheetId,
-    range: `${quoteSheetName(context.sheetName)}!A:K`,
+    range: `${quoteSheetName(sheetName)}!A:K`,
     valueInputOption: "USER_ENTERED",
     insertDataOption: "INSERT_ROWS",
     requestBody: {
@@ -703,7 +706,8 @@ function getSheetsContext({
   targetSheetName: string;
 }): SheetsContext {
   const spreadsheetId = targetSheetId || process.env.GOOGLE_SHEET_ID || "";
-  const sheetName = targetSheetName || process.env.SHEET_NAME || "Sheet1";
+  const customSheetName = clean(targetSheetName);
+  const sheetName = customSheetName || process.env.SHEET_NAME || "Sheet1";
 
   if (!spreadsheetId) {
     throw new Error("Missing Google Sheet ID.");
@@ -732,8 +736,43 @@ function getSheetsContext({
   return {
     spreadsheetId,
     sheetName,
+    hasCustomSheetName: Boolean(customSheetName),
     sheets: google.sheets({ version: "v4", auth }),
   };
+}
+
+async function resolveAppendSheetName(context: SheetsContext) {
+  const spreadsheet = await context.sheets.spreadsheets.get({
+    spreadsheetId: context.spreadsheetId,
+    fields: "sheets.properties.title",
+  });
+
+  const sheetNames =
+    spreadsheet.data.sheets
+      ?.map((sheet) => clean(sheet.properties?.title))
+      .filter(Boolean) || [];
+
+  if (sheetNames.length === 0) {
+    throw new Error("The spreadsheet does not have any tabs.");
+  }
+
+  const exactMatch = sheetNames.find(
+    (sheetName) => sheetName === context.sheetName
+  );
+  if (exactMatch) return exactMatch;
+
+  const looseMatch = sheetNames.find(
+    (sheetName) => sheetName.toLowerCase() === context.sheetName.toLowerCase()
+  );
+  if (looseMatch) return looseMatch;
+
+  if (context.hasCustomSheetName) {
+    throw new Error(
+      `The sheet/tab "${context.sheetName}" was not found in the spreadsheet.`
+    );
+  }
+
+  return sheetNames[0];
 }
 
 function normalizeCardFromBody(value: unknown): FinalCard {
